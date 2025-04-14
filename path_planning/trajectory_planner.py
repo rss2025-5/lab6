@@ -9,6 +9,7 @@ from math import sqrt
 assert rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped, PoseStamped, PoseArray
 from nav_msgs.msg import OccupancyGrid
+from tf_transformations import euler_from_quaternion
 from .utils import LineTrajectory
 
 
@@ -29,7 +30,7 @@ class PathPlan(Node):
 
         self.occupancy_grid = None
         self.resolution = 1.0
-        self.origin = (0.0, 0.0)
+        self.origin = None
 
         self.map_sub = self.create_subscription(
             OccupancyGrid,
@@ -66,17 +67,18 @@ class PathPlan(Node):
         self.occupancy_grid = dilation(init_grid, disk(10))
 
         self.resolution = msg.info.resolution
-        self.origin = (msg.info.origin.position.x, msg.info.origin.position.y)
+        self.origin = msg.info.origin
 
         self.get_logger().info("Map loaded")
 
 
     def pose_cb(self, pose):
         s = pose
-        self.start = (s.pose.pose.position.x, s.pose.pose.position.y)
+        self.start = self.real_to_pixel(s.pose.pose.position.x, s.pose.pose.position.y)
+        self.get_logger().info(f"start: {self.start}")
 
     def goal_cb(self, msg):
-        self.goal = (msg.pose.position.x, msg.pose.position.y)
+        self.goal = self.real_to_pixel(msg.pose.position.x, msg.pose.position.y)
         self.plan_path(self.start, self.goal)
 
 
@@ -114,8 +116,6 @@ class PathPlan(Node):
         x, y = current
         dx, dy = direction
         nx, ny = x + dx, y + dy
-
-        self.get_logger().info(f"nx: {nx}, ny: {ny}")
 
         if not self.is_free((nx, ny)):
             return None
@@ -181,6 +181,55 @@ class PathPlan(Node):
             path.append(current)
         path.reverse()
         return path
+    
+    def create_transform_matrix_2d(self, theta, tx, ty):
+        c = np.cos(theta)
+        s = np.sin(theta)
+        return np.array([
+            [c, -s, tx],
+            [s,  c, ty],
+            [0,  0, 1]
+        ])
+
+    def pixel_to_real(self, u, v):
+        # Step 1: scale
+        resolution = self.resolution
+        scaled_x = u * resolution
+        scaled_y = v * resolution
+        pixel_hom = np.array([scaled_x, scaled_y, 1.0])  # homogeneous
+
+        # Step 2: rotation and translation
+        q = self.orientation
+        _, _, theta = euler_from_quaternion((q.x, q.y, q.z, q.w))
+
+        tx = self.origin.x
+        ty = self.origin.y
+
+        T = self.create_transform_matrix_2d(theta, tx, ty)
+
+        world = T @ pixel_hom
+        return world[0], world[1]
+
+    def real_to_pixel(self, x, y):
+        # Step 1: get inverse transform matrix
+        q = self.origin.orientation
+        _, _, theta = euler_from_quaternion((q.x, q.y, q.z, q.w))
+        tx = self.origin.position.x
+        ty = self.origin.position.y
+
+        T = self.create_transform_matrix_2d(theta, tx, ty)
+        T_inv = np.linalg.inv(T)
+
+        # Step 2: apply inverse transform
+        world_hom = np.array([x, y, 1.0])
+        pixel_hom = T_inv @ world_hom
+
+        # Step 3: scale down to pixel coords
+        resolution = self.resolution
+        u = pixel_hom[0] / resolution
+        v = pixel_hom[1] / resolution
+        return int(round(u)), int(round(v))
+
 
     # def a_star(self, start, goal):
     #     frontier = PriorityQueue()
