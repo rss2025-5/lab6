@@ -9,7 +9,6 @@ from math import sqrt
 assert rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped, PoseStamped, PoseArray
 from nav_msgs.msg import OccupancyGrid
-from tf_transformations import euler_from_quaternion
 from .utils import LineTrajectory
 
 
@@ -88,7 +87,8 @@ class PathPlan(Node):
             self.get_logger().info("Path not found")
         else:
             for point in path:
-                self.trajectory.addPoint(point)
+                x, y = self.pixel_to_real(point[0], point[1])
+                self.trajectory.addPoint([x, y])
             self.traj_pub.publish(self.trajectory.toPoseArray())
             self.trajectory.publish_viz()
     
@@ -112,27 +112,47 @@ class PathPlan(Node):
         dx, dy = abs(a[0] - b[0]), abs(a[1] - b[1])
         return sqrt(dx * dx + dy * dy)
 
-    def jump(self, current, direction, goal):
+    def jump(self, current, direction, goal, depth=0, max_depth=500):
+
         x, y = current
         dx, dy = direction
         nx, ny = x + dx, y + dy
 
+        if depth > max_depth:
+            self.get_logger().warn("Max recursion depth reached")
+            return (x, y)
+
         if not self.is_free((nx, ny)):
             return None
+
         if (nx, ny) == goal:
             return (nx, ny)
 
-        # Forced neighbors
-        if dx != 0 and dy != 0:
+        # Forced neighbor check 
+        if dx != 0 and dy != 0:  # Diagonal
             if (self.is_free((nx - dx, ny + dy)) and not self.is_free((nx - dx, ny))) or \
-               (self.is_free((nx + dx, ny - dy)) and not self.is_free((nx, ny - dy))):
+            (self.is_free((nx + dx, ny - dy)) and not self.is_free((nx, ny - dy))):
                 return (nx, ny)
 
-        # Recursive jumping
-        if dx != 0 and dy != 0:
-            if self.jump((nx, ny), (dx, 0), goal) or self.jump((nx, ny), (0, dy), goal):
+            if self.jump((nx, ny), (dx, 0), goal, depth + 1, max_depth) is not None or \
+            self.jump((nx, ny), (0, dy), goal, depth + 1, max_depth) is not None:
                 return (nx, ny)
-        return self.jump((nx, ny), (dx, dy), goal)
+
+        elif dx != 0:  # Horizontal
+            if (self.is_free((nx, ny + 1)) and not self.is_free((x, y + 1))) or \
+            (self.is_free((nx, ny - 1)) and not self.is_free((x, y - 1))):
+                return (nx, ny)
+
+        elif dy != 0:  # Vertical
+            if (self.is_free((nx + 1, ny)) and not self.is_free((x + 1, y))) or \
+            (self.is_free((nx - 1, ny)) and not self.is_free((x - 1, y))):
+                return (nx, ny)
+
+        # Ensure we don’t recurse to the same position
+        if (nx, ny) == (x, y):
+            return None
+
+        return self.jump((nx, ny), (dx, dy), goal, depth + 1, max_depth)
 
     def successors(self, current, parent, goal):
         directions = []
@@ -144,12 +164,13 @@ class PathPlan(Node):
         else:
             dx = int((current[0] - parent[0]) / max(abs(current[0] - parent[0]), 1))
             dy = int((current[1] - parent[1]) / max(abs(current[1] - parent[1]), 1))
-            directions.append((dx, dy))
+            if dx != 0 or dy != 0:
+                directions.append((dx, dy))
             if dx != 0 and dy != 0:
                 directions.extend([(dx, 0), (0, dy)])
 
         for d in directions:
-            jp = self.jump(current, d, goal)
+            jp = self.jump(current, d, goal, 0, 500)
             if jp:
                 yield jp
 
@@ -165,6 +186,7 @@ class PathPlan(Node):
                 continue
             visited.add(current)
             came_from[current] = parent
+            self.get_logger().info(f"cur: {current}")
             if current == goal:
                 return self.reconstruct_path(came_from, current)
             for succ in self.successors(current, parent, goal):
@@ -199,11 +221,11 @@ class PathPlan(Node):
         pixel_hom = np.array([scaled_x, scaled_y, 1.0])  # homogeneous
 
         # Step 2: rotation and translation
-        q = self.orientation
-        _, _, theta = euler_from_quaternion((q.x, q.y, q.z, q.w))
+        q = self.origin.orientation
+        _, _, theta = self.euler_from_quaternion(q)
 
-        tx = self.origin.x
-        ty = self.origin.y
+        tx = self.origin.position.x
+        ty = self.origin.position.y
 
         T = self.create_transform_matrix_2d(theta, tx, ty)
 
@@ -213,7 +235,7 @@ class PathPlan(Node):
     def real_to_pixel(self, x, y):
         # Step 1: get inverse transform matrix
         q = self.origin.orientation
-        _, _, theta = euler_from_quaternion((q.x, q.y, q.z, q.w))
+        _, _, theta = self.euler_from_quaternion(q)
         tx = self.origin.position.x
         ty = self.origin.position.y
 
@@ -229,6 +251,30 @@ class PathPlan(Node):
         u = pixel_hom[0] / resolution
         v = pixel_hom[1] / resolution
         return int(round(u)), int(round(v))
+    
+    def euler_from_quaternion(self, quaternion):
+        """
+        Converts quaternion (w in last place) to euler roll, pitch, yaw
+        quaternion = [x, y, z, w]
+        Bellow should be replaced when porting for ROS 2 Python tf_conversions is done.
+        """
+        x = quaternion.x
+        y = quaternion.y
+        z = quaternion.z
+        w = quaternion.w
+
+        sinr_cosp = 2 * (w * x + y * z)
+        cosr_cosp = 1 - 2 * (x * x + y * y)
+        roll = np.arctan2(sinr_cosp, cosr_cosp)
+
+        sinp = 2 * (w * y - z * x)
+        pitch = np.arcsin(sinp)
+
+        siny_cosp = 2 * (w * z + x * y)
+        cosy_cosp = 1 - 2 * (y * y + z * z)
+        yaw = np.arctan2(siny_cosp, cosy_cosp)
+
+        return roll, pitch, yaw
 
 
     # def a_star(self, start, goal):
