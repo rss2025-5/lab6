@@ -93,8 +93,7 @@ class PurePursuit(Node):
 
         # 5. Compute steering
         alpha = math.atan2(local_y, local_x)
-        Ld = math.sqrt(local_x ** 2 + local_y ** 2)
-
+        Ld = math.sqrt(local_x**2 + local_y**2)
         if Ld < 1e-5:
             return
 
@@ -105,6 +104,33 @@ class PurePursuit(Node):
         drive_msg.drive.steering_angle = steering_angle
         drive_msg.drive.speed = self.speed
         self.drive_pub.publish(drive_msg)
+
+    def find_circle_segment_intersection(self, center, radius, p1, p2):
+        # Shift segment to circle's coordinate system
+        p1_shifted = p1 - center
+        p2_shifted = p2 - center
+        d = p2_shifted - p1_shifted
+        f = p1_shifted
+
+        a = np.dot(d, d)
+        b = 2 * np.dot(f, d)
+        c = np.dot(f, f) - radius**2
+
+        discriminant = b**2 - 4*a*c
+        if discriminant < 0:
+            return None  # no intersection
+
+        discriminant = math.sqrt(discriminant)
+        t1 = (-b - discriminant) / (2*a)
+        t2 = (-b + discriminant) / (2*a)
+
+        for t in [t1, t2]:
+            if 0.0 <= t <= 1.0:
+                intersection = p1 + t * (p2 - p1)
+                return intersection
+
+        return None
+
     def trajectory_callback(self, msg):
         self.get_logger().info(f"Receiving new trajectory {len(msg.poses)} points")
 
