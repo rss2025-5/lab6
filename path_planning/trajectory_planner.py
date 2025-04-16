@@ -1,13 +1,10 @@
 import rclpy
 from rclpy.node import Node
-<<<<<<< Updated upstream
-=======
 from queue import PriorityQueue
 from skimage.morphology import disk, dilation
 import numpy as np
 import heapq
 from math import sqrt
->>>>>>> Stashed changes
 
 assert rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped, PoseStamped, PoseArray
@@ -29,6 +26,10 @@ class PathPlan(Node):
         self.odom_topic = self.get_parameter('odom_topic').get_parameter_value().string_value
         self.map_topic = self.get_parameter('map_topic').get_parameter_value().string_value
         self.initial_pose_topic = self.get_parameter('initial_pose_topic').get_parameter_value().string_value
+
+        self.occupancy_grid = None
+        self.resolution = 1.0
+        self.origin = None
 
         self.map_sub = self.create_subscription(
             OccupancyGrid,
@@ -59,19 +60,26 @@ class PathPlan(Node):
         self.trajectory = LineTrajectory(node=self, viz_namespace="/planned_trajectory")
 
     def map_cb(self, msg):
-        raise NotImplementedError
+
+        init_grid = np.array(msg.data)
+        init_grid = init_grid.reshape((msg.info.height, msg.info.width))
+        self.occupancy_grid = dilation(init_grid, disk(12))
+
+        self.resolution = msg.info.resolution
+        self.origin = msg.info.origin
+
+        self.get_logger().info("Map loaded")
+
 
     def pose_cb(self, pose):
-        raise NotImplementedError
+        s = pose
+        self.start = self.real_to_pixel(s.pose.pose.position.x, s.pose.pose.position.y)
+        self.get_logger().info(f"start: {self.start}")
 
     def goal_cb(self, msg):
-        raise NotImplementedError
+        self.goal = self.real_to_pixel(msg.pose.position.x, msg.pose.position.y)
+        self.plan_path(self.start, self.goal)
 
-<<<<<<< Updated upstream
-    def plan_path(self, start_point, end_point, map):
-        self.traj_pub.publish(self.trajectory.toPoseArray())
-        self.trajectory.publish_viz()
-=======
 
     def plan_path(self, start_point, end_point):
         path = self.jump_point_search(start_point, end_point)
@@ -87,7 +95,7 @@ class PathPlan(Node):
     def is_free(self, pos):
         x, y = pos
         if 0 <= x < self.occupancy_grid.shape[1] and 0 <= y < self.occupancy_grid.shape[0]:
-            return self.occupancy_grid[y, x]==0
+            return self.occupancy_grid[y, x] == 0
         return False
 
     def is_jump_point(self, pos, direction):
@@ -119,7 +127,7 @@ class PathPlan(Node):
         x, y = current
 
         if depth > max_depth:
-            return (x, y)
+            return (x,y))
 
 
         dx, dy = direction
@@ -373,7 +381,6 @@ class PathPlan(Node):
     #                 priority = new_cost + heuristic(goal, next)
     #                 frontier.put(next, priority)
     #                 came_from[next] = current
->>>>>>> Stashed changes
 
 
 def main(args=None):
