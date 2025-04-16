@@ -9,6 +9,10 @@ from ackermann_msgs.msg import AckermannDriveStamped
 
 from .utils import LineTrajectory
 
+from tf2_ros import Buffer, TransformListener
+from tf2_geometry_msgs import do_transform_pose
+from geometry_msgs.msg import PoseStamped
+
 
 class PurePursuit(Node):
     def __init__(self):
@@ -29,6 +33,9 @@ class PurePursuit(Node):
         self.odom_sub = self.create_subscription(Odometry, self.odom_topic, self.pose_callback, 1)
         self.traj_sub = self.create_subscription(PoseArray, "/trajectory/current", self.trajectory_callback, 1)
         self.drive_pub = self.create_publisher(AckermannDriveStamped, self.drive_topic, 1)
+
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
 
     def trajectory_callback(self, msg):
         self.get_logger().info(f"Receiving new trajectory {len(msg.poses)} points")
@@ -75,6 +82,9 @@ class PurePursuit(Node):
             return
 
         steering_angle = math.atan2(2 * self.wheelbase_length * local_y, self.lookahead**2)
+
+        self.get_logger().warn(f"speed: {self.speed}")
+        self.get_logger().warn(f"angle: {steering_angle}")
 
         drive_msg = AckermannDriveStamped()
         drive_msg.drive.speed = self.speed

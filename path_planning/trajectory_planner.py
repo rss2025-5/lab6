@@ -127,7 +127,7 @@ class PathPlan(Node):
         x, y = current
 
         if depth > max_depth:
-            return (x,y))
+            return (x,y)
 
 
         dx, dy = direction
