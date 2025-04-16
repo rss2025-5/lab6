@@ -95,7 +95,7 @@ class PathPlan(Node):
     def is_free(self, pos):
         x, y = pos
         if 0 <= x < self.occupancy_grid.shape[1] and 0 <= y < self.occupancy_grid.shape[0]:
-            return self.occupancy_grid[y, x] < 100
+            return self.occupancy_grid[y, x] == 0
         return False
 
     def is_jump_point(self, pos, direction):
