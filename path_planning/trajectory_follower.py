@@ -7,7 +7,7 @@ import math
 from sensor_msgs.msg import LaserScan
 from rcl_interfaces.msg import SetParametersResult
 from visualization_msgs.msg import Marker
-from nav_msg.msg import Odometry
+from nav_msgs.msg import Odometry
 
 from .utils import LineTrajectory
 
@@ -24,9 +24,9 @@ class PurePursuit(Node):
         self.odom_topic = self.get_parameter('odom_topic').get_parameter_value().string_value
         self.drive_topic = self.get_parameter('drive_topic').get_parameter_value().string_value
 
-        self.lookahead = 1.5  # FILL IN #
+        self.following_distance = 0.01  # FILL IN #
         self.speed = 0.5  # FILL IN #
-        self.wheelbase_length = 0  # FILL IN #
+        self.wheelbase = 0.33  # FILL IN #
 
         self.trajectory = LineTrajectory("/followed_trajectory")
 
@@ -45,91 +45,39 @@ class PurePursuit(Node):
                                                self.drive_topic,
                                                1)
 
-    def pose_callback(self, odometry_msg):
+        self.initialized_traj = False
+
+    def pose_callback(self, msg):
         if not self.initialized_traj or len(self.trajectory.points) < 2:
             return
 
-        # 1. Get car position
-        position = odometry_msg.pose.pose.position
-        orientation = odometry_msg.pose.pose.orientation
-
-        car_x = position.x
-        car_y = position.y
-
-        # Get yaw from quaternion
-        siny_cosp = 2 * (orientation.w * orientation.z + orientation.x * orientation.y)
-        cosy_cosp = 1 - 2 * (orientation.y * orientation.y + orientation.z * orientation.z)
-        car_yaw = math.atan2(siny_cosp, cosy_cosp)
-
-        # 2. Find nearest point on trajectory
-        car_pos = np.array([car_x, car_y])
-        traj_pts = np.array(self.trajectory.points)  # list of (x, y)
-
-        dists = np.linalg.norm(traj_pts - car_pos, axis=1)
+        traj_pts = np.array(self.trajectory.points)
+        self.get_logger().info(f"traj_pts:{traj_pts}")
+        dists = np.linalg.norm(traj_pts - np.array([msg.pose.pose.position.x, msg.pose.pose.position.y]), axis=1)
         nearest_idx = np.argmin(dists)
+        closest_x = traj_pts[nearest_idx][0]
+        closest_y = traj_pts[nearest_idx][1]
 
-        # 3. Find lookahead point
-        lookahead_point = None
-        for i in range(nearest_idx, len(traj_pts) - 1):
-            p1 = traj_pts[i]
-            p2 = traj_pts[i + 1]
+        self.relative_x = closest_x - msg.pose.pose.position.x
+        self.relative_y = closest_y - msg.pose.pose.position.y
+        distance = np.sqrt(self.relative_x**2 + self.relative_y**2)
 
-            # Compute intersection between circle and line segment
-            lookahead_point = self.find_circle_segment_intersection(car_pos, self.lookahead, p1, p2)
-            if lookahead_point is not None:
-                break
+        angle_to_line= -np.arctan2(-self.relative_y, self.relative_x)
+        drive_cmd = AckermannDriveStamped()
 
-        if lookahead_point is None:
-            self.get_logger().warn("No valid lookahead point found!")
-            return
+        #################################
+        self.distance_error = distance - self.following_distance
 
-        # 4. Transform to car frame
-        dx = lookahead_point[0] - car_x
-        dy = lookahead_point[1] - car_y
+        self.get_logger().info("distance error: %s" %self.distance_error)
+        self.get_logger().info("angle to line: %s" %angle_to_line)
 
-        # rotate by -car_yaw
-        local_x = math.cos(-car_yaw) * dx - math.sin(-car_yaw) * dy
-        local_y = math.sin(-car_yaw) * dx + math.cos(-car_yaw) * dy
+        steering_angle = math.atan2(2.0 * self.wheelbase * math.sin(angle_to_line), distance)
+        velocity = min(self.distance_error*2, 0.8)
 
-        # 5. Compute steering
-        alpha = math.atan2(local_y, local_x)
-        Ld = math.sqrt(local_x**2 + local_y**2)
-        if Ld < 1e-5:
-            return
+        drive_cmd.drive.steering_angle = -steering_angle
+        drive_cmd.drive.speed = velocity
 
-        steering_angle = math.atan2(2.0 * self.wheelbase_length * math.sin(alpha), Ld)
-
-        # 6. Publish drive command
-        drive_msg = AckermannDriveStamped()
-        drive_msg.drive.steering_angle = steering_angle
-        drive_msg.drive.speed = self.speed
-        self.drive_pub.publish(drive_msg)
-
-    def find_circle_segment_intersection(self, center, radius, p1, p2):
-        # Shift segment to circle's coordinate system
-        p1_shifted = p1 - center
-        p2_shifted = p2 - center
-        d = p2_shifted - p1_shifted
-        f = p1_shifted
-
-        a = np.dot(d, d)
-        b = 2 * np.dot(f, d)
-        c = np.dot(f, f) - radius**2
-
-        discriminant = b**2 - 4*a*c
-        if discriminant < 0:
-            return None  # no intersection
-
-        discriminant = math.sqrt(discriminant)
-        t1 = (-b - discriminant) / (2*a)
-        t2 = (-b + discriminant) / (2*a)
-
-        for t in [t1, t2]:
-            if 0.0 <= t <= 1.0:
-                intersection = p1 + t * (p2 - p1)
-                return intersection
-
-        return None
+        self.drive_pub.publish(drive_cmd)
 
     def trajectory_callback(self, msg):
         self.get_logger().info(f"Receiving new trajectory {len(msg.poses)} points")
