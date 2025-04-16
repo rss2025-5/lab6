@@ -2,6 +2,12 @@ import rclpy
 from ackermann_msgs.msg import AckermannDriveStamped
 from geometry_msgs.msg import PoseArray
 from rclpy.node import Node
+import numpy as np
+import math
+from sensor_msgs.msg import LaserScan
+from rcl_interfaces.msg import SetParametersResult
+from visualization_msgs.msg import Marker
+from nav_msg.msg import Odometry
 
 from .utils import LineTrajectory
 
@@ -18,11 +24,18 @@ class PurePursuit(Node):
         self.odom_topic = self.get_parameter('odom_topic').get_parameter_value().string_value
         self.drive_topic = self.get_parameter('drive_topic').get_parameter_value().string_value
 
-        self.lookahead = 0  # FILL IN #
-        self.speed = 0  # FILL IN #
+        self.lookahead = 1.5  # FILL IN #
+        self.speed = 0.5  # FILL IN #
         self.wheelbase_length = 0  # FILL IN #
 
         self.trajectory = LineTrajectory("/followed_trajectory")
+
+        self.odom_sub = self.create_subscription(
+            Odometry,
+            self.odom_topic,
+            self.pose_callback,
+            1
+        )
 
         self.traj_sub = self.create_subscription(PoseArray,
                                                  "/trajectory/current",
@@ -33,8 +46,65 @@ class PurePursuit(Node):
                                                1)
 
     def pose_callback(self, odometry_msg):
-        raise NotImplementedError
+        if not self.initialized_traj or len(self.trajectory.points) < 2:
+            return
 
+        # 1. Get car position
+        position = odometry_msg.pose.pose.position
+        orientation = odometry_msg.pose.pose.orientation
+
+        car_x = position.x
+        car_y = position.y
+
+        # Get yaw from quaternion
+        siny_cosp = 2 * (orientation.w * orientation.z + orientation.x * orientation.y)
+        cosy_cosp = 1 - 2 * (orientation.y * orientation.y + orientation.z * orientation.z)
+        car_yaw = math.atan2(siny_cosp, cosy_cosp)
+
+        # 2. Find nearest point on trajectory
+        car_pos = np.array([car_x, car_y])
+        traj_pts = np.array(self.trajectory.points)  # list of (x, y)
+
+        dists = np.linalg.norm(traj_pts - car_pos, axis=1)
+        nearest_idx = np.argmin(dists)
+
+        # 3. Find lookahead point
+        lookahead_point = None
+        for i in range(nearest_idx, len(traj_pts) - 1):
+            p1 = traj_pts[i]
+            p2 = traj_pts[i + 1]
+
+            # Compute intersection between circle and line segment
+            lookahead_point = self.find_circle_segment_intersection(car_pos, self.lookahead, p1, p2)
+            if lookahead_point is not None:
+                break
+
+        if lookahead_point is None:
+            self.get_logger().warn("No valid lookahead point found!")
+            return
+
+        # 4. Transform to car frame
+        dx = lookahead_point[0] - car_x
+        dy = lookahead_point[1] - car_y
+
+        # rotate by -car_yaw
+        local_x = math.cos(-car_yaw) * dx - math.sin(-car_yaw) * dy
+        local_y = math.sin(-car_yaw) * dx + math.cos(-car_yaw) * dy
+
+        # 5. Compute steering
+        alpha = math.atan2(local_y, local_x)
+        Ld = math.sqrt(local_x ** 2 + local_y ** 2)
+
+        if Ld < 1e-5:
+            return
+
+        steering_angle = math.atan2(2.0 * self.wheelbase_length * math.sin(alpha), Ld)
+
+        # 6. Publish drive command
+        drive_msg = AckermannDriveStamped()
+        drive_msg.drive.steering_angle = steering_angle
+        drive_msg.drive.speed = self.speed
+        self.drive_pub.publish(drive_msg)
     def trajectory_callback(self, msg):
         self.get_logger().info(f"Receiving new trajectory {len(msg.poses)} points")
 
