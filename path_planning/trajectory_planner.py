@@ -63,7 +63,7 @@ class PathPlan(Node):
 
         init_grid = np.array(msg.data)
         init_grid = init_grid.reshape((msg.info.height, msg.info.width))
-        self.occupancy_grid = dilation(init_grid, disk(10))
+        self.occupancy_grid = dilation(init_grid, disk(12))
 
         self.resolution = msg.info.resolution
         self.origin = msg.info.origin
@@ -95,84 +95,165 @@ class PathPlan(Node):
     def is_free(self, pos):
         x, y = pos
         if 0 <= x < self.occupancy_grid.shape[1] and 0 <= y < self.occupancy_grid.shape[0]:
-            return self.occupancy_grid[y, x] == 0
+            return self.occupancy_grid[y, x] < 100
         return False
 
-    def neighbors(self, pos):
+    def is_jump_point(self, pos, direction):
         x, y = pos
-        for dx in [-1, 0, 1]:
-            for dy in [-1, 0, 1]:
-                if dx == 0 and dy == 0:
-                    continue
-                nx, ny = x + dx, y + dy
-                if self.is_free((nx, ny)):
-                    yield (nx, ny)
+        dx, dy = direction
+
+        if dx != 0 and dy != 0:  # Diagonal
+            if not self.is_free((x - dx, y)) and self.is_free((x - dx, y + dy)):
+                return True
+            if not self.is_free((x, y - dy)) and self.is_free((x + dx, y - dy)):
+                return True
+        elif dx != 0:  # Horizontal
+            if not self.is_free((x, y + 1)) and self.is_free((x + dx, y + 1)):
+                return True
+            if not self.is_free((x, y - 1)) and self.is_free((x + dx, y - 1)):
+                return True
+        elif dy != 0:  # Vertical
+            if not self.is_free((x + 1, y)) and self.is_free((x + 1, y + dy)):
+                return True
+            if not self.is_free((x - 1, y)) and self.is_free((x - 1, y + dy)):
+                return True
+        return False
 
     def heuristic(self, a, b):
         dx, dy = abs(a[0] - b[0]), abs(a[1] - b[1])
         return sqrt(dx * dx + dy * dy)
-
-    def jump(self, current, direction, goal, depth=0, max_depth=500):
+    
+    def jump(self, current, direction, goal, depth=0, max_depth=700):
+        if depth > max_depth:
+            return None
 
         x, y = current
         dx, dy = direction
         nx, ny = x + dx, y + dy
 
-        if depth > max_depth:
-            self.get_logger().warn("Max recursion depth reached")
-            return (x, y)
-
         if not self.is_free((nx, ny)):
             return None
-
         if (nx, ny) == goal:
             return (nx, ny)
 
-        # Forced neighbor check 
-        if dx != 0 and dy != 0:  # Diagonal
-            if (self.is_free((nx - dx, ny + dy)) and not self.is_free((nx - dx, ny))) or \
-            (self.is_free((nx + dx, ny - dy)) and not self.is_free((nx, ny - dy))):
+        if self.is_jump_point((nx, ny), (dx, dy)):
+            return (nx, ny)
+
+        # Check recursive jumps from diagonal
+        if dx != 0 and dy != 0:
+            if self.jump((nx, ny), (dx, 0), goal, depth + 1) is not None:
+                return (nx, ny)
+            if self.jump((nx, ny), (0, dy), goal, depth + 1) is not None:
                 return (nx, ny)
 
-            if self.jump((nx, ny), (dx, 0), goal, depth + 1, max_depth) is not None or \
-            self.jump((nx, ny), (0, dy), goal, depth + 1, max_depth) is not None:
-                return (nx, ny)
+        return self.jump((nx, ny), (dx, dy), goal, depth + 1)
 
-        elif dx != 0:  # Horizontal
-            if (self.is_free((nx, ny + 1)) and not self.is_free((x, y + 1))) or \
-            (self.is_free((nx, ny - 1)) and not self.is_free((x, y - 1))):
-                return (nx, ny)
+    # def jump(self, current, direction, goal, depth=0, max_depth=50):
 
-        elif dy != 0:  # Vertical
-            if (self.is_free((nx + 1, ny)) and not self.is_free((x + 1, y))) or \
-            (self.is_free((nx - 1, ny)) and not self.is_free((x - 1, y))):
-                return (nx, ny)
+    #     x, y = current
+    #     dx, dy = direction
+    #     nx, ny = x + dx, y + dy
 
-        # Ensure we don’t recurse to the same position
-        if (nx, ny) == (x, y):
-            return None
+    #     if depth > max_depth:
+    #         self.get_logger().warn("Max recursion depth reached")
+    #         return (x, y)
 
-        return self.jump((nx, ny), (dx, dy), goal, depth + 1, max_depth)
+    #     if not self.is_free((nx, ny)):
+    #         return None
+
+    #     if (nx, ny) == goal:
+    #         return (nx, ny)
+
+    #     # Forced neighbor check 
+    #     if dx != 0 and dy != 0:  # Diagonal
+    #         if (self.is_free((nx - dx, ny + dy)) and not self.is_free((nx - dx, ny))) or \
+    #         (self.is_free((nx + dx, ny - dy)) and not self.is_free((nx, ny - dy))):
+    #             return (nx, ny)
+
+    #         if self.jump((nx, ny), (dx, 0), goal, depth + 1, max_depth) is not None or \
+    #         self.jump((nx, ny), (0, dy), goal, depth + 1, max_depth) is not None:
+    #             return (nx, ny)
+
+    #     elif dx != 0:  # Horizontal
+    #         if (self.is_free((nx, ny + 1)) and not self.is_free((x, y + 1))) or \
+    #         (self.is_free((nx, ny - 1)) and not self.is_free((x, y - 1))):
+    #             return (nx, ny)
+
+    #     elif dy != 0:  # Vertical
+    #         if (self.is_free((nx + 1, ny)) and not self.is_free((x + 1, y))) or \
+    #         (self.is_free((nx - 1, ny)) and not self.is_free((x - 1, y))):
+    #             return (nx, ny)
+
+    #     # Ensure we don’t recurse to the same position
+    #     if (nx, ny) == (x, y):
+    #         return None
+
+    #     return self.jump((nx, ny), (dx, dy), goal, depth + 1, max_depth)
 
     def successors(self, current, parent, goal):
+        x, y = current
+
         directions = []
         if parent is None:
+            # No pruning if no parent: first expansion
             for dx in [-1, 0, 1]:
                 for dy in [-1, 0, 1]:
                     if dx != 0 or dy != 0:
                         directions.append((dx, dy))
         else:
-            dx = int((current[0] - parent[0]) / max(abs(current[0] - parent[0]), 1))
-            dy = int((current[1] - parent[1]) / max(abs(current[1] - parent[1]), 1))
-            if dx != 0 or dy != 0:
-                directions.append((dx, dy))
-            if dx != 0 and dy != 0:
-                directions.extend([(dx, 0), (0, dy)])
+            px, py = parent
+            dx = int((x - px) / max(abs(x - px), 1))
+            dy = int((y - py) / max(abs(y - py), 1))
 
+            # Always include the direction we came from
+            directions.append((dx, dy))
+
+            if dx != 0 and dy != 0:  # Diagonal move
+                # Add natural neighbors
+                if self.is_free((x + dx, y)):
+                    directions.append((dx, 0))
+                if self.is_free((x, y + dy)):
+                    directions.append((0, dy))
+
+                # Check for forced neighbors
+                if not self.is_free((x - dx, y)) and self.is_free((x - dx, y + dy)):
+                    directions.append((-dx, dy))
+                if not self.is_free((x, y - dy)) and self.is_free((x + dx, y - dy)):
+                    directions.append((dx, -dy))
+
+            elif dx != 0:  # Horizontal move
+                if self.is_free((x + dx, y)):
+                    directions.append((dx, 0))
+                # Forced neighbors (up/down diagonals if adjacent blocked)
+                if not self.is_free((x, y + 1)) and self.is_free((x + dx, y + 1)):
+                    directions.append((dx, 1))
+                if not self.is_free((x, y - 1)) and self.is_free((x + dx, y - 1)):
+                    directions.append((dx, -1))
+
+            elif dy != 0:  # Vertical move
+                if self.is_free((x, y + dy)):
+                    directions.append((0, dy))
+                # Forced neighbors (left/right diagonals if adjacent blocked)
+                if not self.is_free((x + 1, y)) and self.is_free((x + 1, y + dy)):
+                    directions.append((1, dy))
+                if not self.is_free((x - 1, y)) and self.is_free((x - 1, y + dy)):
+                    directions.append((-1, dy))
+
+        # Try jumps only in pruned directions
         for d in directions:
-            jp = self.jump(current, d, goal, 0, 500)
+            jp = self.jump(current, d, goal)
             if jp:
                 yield jp
+
+    # def successors(self, current, parent, goal):
+    # # Temporarily ignore parent-based pruning for correctness
+    #     for dx in [-1, 0, 1]:
+    #         for dy in [-1, 0, 1]:
+    #             if dx == 0 and dy == 0:
+    #                 continue
+    #             jp = self.jump(current, (dx, dy), goal)
+    #             if jp:
+    #                 yield jp
 
     def jump_point_search(self, start, goal):
         open_list = []
