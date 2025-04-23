@@ -110,16 +110,6 @@ class PathPlan(Node):
 
 
     def plan_path(self, start_point, end_point):
-        path = self.jump_point_search(start_point, end_point)
-        if path is None:
-            self.get_logger().info("Path not found")
-        else:
-            for point in path:
-                x, y = self.pixel_to_real(point[0], point[1])
-                self.trajectory.addPoint([x, y])
-            self.traj_pub.publish(self.trajectory.toPoseArray())
-            self.trajectory.publish_viz()
-    def plan_path(self, start_point, end_point):
         start_time = time.time()
 
         path = self.jump_point_search(start_point, end_point) # edit with a star
