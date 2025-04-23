@@ -13,6 +13,9 @@ from tf2_ros import Buffer, TransformListener
 from tf2_geometry_msgs import do_transform_pose
 from geometry_msgs.msg import PoseStamped
 
+import matplotlib as plt
+from std_msgs.msg import Float32
+
 
 class PurePursuit(Node):
     def __init__(self):
@@ -34,11 +37,13 @@ class PurePursuit(Node):
         self.traj_sub = self.create_subscription(PoseArray, "/trajectory/current", self.trajectory_callback, 1)
         self.drive_pub = self.create_publisher(AckermannDriveStamped, self.drive_topic, 1)
 
+        self.angle_error_pub = self.create_publisher(Float32, '/angle_error', 1)
+
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
     def trajectory_callback(self, msg):
-       #  self.get_logger().info(f"Receiving new trajectory {len(msg.poses)} points")
+        self.get_logger().info(f"Receiving new trajectory {len(msg.poses)} points")
         self.trajectory.clear()
         self.trajectory.fromPoseArray(msg)
         self.trajectory.publish_viz()
@@ -68,12 +73,15 @@ class PurePursuit(Node):
         # Find lookahead point starting from that segment
         lookahead_pt = self.find_lookahead_point(car_pos, closest_seg_idx)
         if lookahead_pt is None:
-          #  self.get_logger().info(f"tpoints: {car_pos}")
+            self.get_logger().warn("No valid lookahead point found.")
             return
+
+
 
         # Transform lookahead to car frame
         dx = lookahead_pt[0] - x
         dy = lookahead_pt[1] - y
+
         local_x = math.cos(-yaw) * dx - math.sin(-yaw) * dy
         local_y = math.sin(-yaw) * dx + math.cos(-yaw) * dy
 
@@ -83,16 +91,20 @@ class PurePursuit(Node):
 
         steering_angle = math.atan2(2 * self.wheelbase_length * local_y, self.lookahead**2)
 
-       # self.get_logger().warn(f"speed: {self.speed}")
-       # self.get_logger().warn(f"angle: {steering_angle}")
-
-        self.speed = 5.5*(1.0-0.8*abs(math.sin(steering_angle)))
-        self.lookahead = 1.5*(1.0 - 0.025*self.speed) 
+        self.get_logger().warn(f"speed: {self.speed}")
+        self.get_logger().warn(f"angle: {steering_angle}")
 
         drive_msg = AckermannDriveStamped()
         drive_msg.drive.speed = self.speed
         drive_msg.drive.steering_angle = steering_angle
         self.drive_pub.publish(drive_msg)
+
+        desired_yaw = math.atan2(dy, dx)
+        angle_error = desired_yaw - yaw
+        angle_error = (angle_error + math.pi) % (2 * math.pi) - math.pi
+        err_msg = Float32()
+        err_msg.data = angle_error
+        self.angle_error_pub.publish(err_msg)
 
     def stop_car(self):
         stop_msg = AckermannDriveStamped()
@@ -179,6 +191,7 @@ class PurePursuit(Node):
         siny_cosp = 2 * (q.w * q.z + q.x * q.y)
         cosy_cosp = 1 - 2 * (q.y**2 + q.z**2)
         return 0.0, 0.0, math.atan2(siny_cosp, cosy_cosp)
+
 
 
 def main(args=None):
