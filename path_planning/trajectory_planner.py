@@ -97,7 +97,7 @@ class PathPlan(Node):
     def plan_path(self, start_point, end_point):
         start_time = time.time()
 
-        path = self.a_star(start_point, end_point) # edit with a star
+        path = self.jump_point_search(start_point, end_point) # edit with a star
 
         end_time = time.time()
         computation_time = end_time - start_time
