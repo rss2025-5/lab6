@@ -91,8 +91,8 @@ class PurePursuit(Node):
 
         steering_angle = math.atan2(2 * self.wheelbase_length * local_y, self.lookahead**2)
 
-        self.get_logger().warn(f"speed: {self.speed}")
-        self.get_logger().warn(f"angle: {steering_angle}")
+        # self.get_logger().warn(f"speed: {self.speed}")
+        # self.get_logger().warn(f"angle: {steering_angle}")
 
         drive_msg = AckermannDriveStamped()
         drive_msg.drive.speed = self.speed

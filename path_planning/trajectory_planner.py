@@ -83,20 +83,7 @@ class PathPlan(Node):
         self.get_logger().info("Map loaded")
 
 
-        init_grid = np.array(msg.data)
-        init_grid = init_grid.reshape((msg.info.height, msg.info.width))
-        self.occupancy_grid = dilation(init_grid, disk(12))
-
-        self.resolution = msg.info.resolution
-        self.origin = msg.info.origin
-
-        self.get_logger().info("Map loaded")
-
-
     def pose_cb(self, pose):
-        s = pose
-        self.start = self.real_to_pixel(s.pose.pose.position.x, s.pose.pose.position.y)
-        self.get_logger().info(f"start: {self.start}")
         s = pose
         self.start = self.real_to_pixel(s.pose.pose.position.x, s.pose.pose.position.y)
         self.get_logger().info(f"start: {self.start}")
@@ -110,13 +97,11 @@ class PathPlan(Node):
     def plan_path(self, start_point, end_point):
         start_time = time.time()
 
-        path = self.jump_point_search(start_point, end_point) # edit with a star
+        path = self.a_star(start_point, end_point) # edit with a star
 
         end_time = time.time()
         computation_time = end_time - start_time
-        time_msg = Float32()
-        time_msg.data = computation_time
-        print(time_msg) # print time
+        self.get_logger().info(f"time:{computation_time}")
 
         if path is None:
             self.get_logger().info("Path not found")
@@ -301,7 +286,7 @@ class PathPlan(Node):
                     heapq.heappush(frontier, (priority, next))
                     came_from[next] = current
 
-        return self.reconstruct_path(came_from, start, goal)
+        return self.reconstruct_path(came_from, goal)
 
     def is_free(self, pos):
         x, y = pos
@@ -519,6 +504,24 @@ class PathPlan(Node):
     #                 priority = new_cost + heuristic(goal, next)
     #                 frontier.put(next, priority)
     #                 came_from[next] = current
+
+    def get_neighbors(self, current):
+        x, y = current
+        neighbors = []
+        for dx in [-1, 0, 1]:
+            for dy in [-1, 0, 1]:
+                if dx == 0 and dy == 0:
+                    continue
+                nx, ny = x + dx, y + dy
+                if self.is_free((nx, ny)):
+                    neighbors.append((nx, ny))
+        return neighbors
+
+    def cost(self, a, b):
+        # Use Euclidean distance for cost
+        dx, dy = abs(a[0] - b[0]), abs(a[1] - b[1])
+        return sqrt(dx**2 + dy**2)
+
 
 
 def main(args=None):
