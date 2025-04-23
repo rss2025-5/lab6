@@ -38,7 +38,7 @@ class PurePursuit(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
     def trajectory_callback(self, msg):
-        self.get_logger().info(f"Receiving new trajectory {len(msg.poses)} points")
+       #  self.get_logger().info(f"Receiving new trajectory {len(msg.poses)} points")
         self.trajectory.clear()
         self.trajectory.fromPoseArray(msg)
         self.trajectory.publish_viz()
@@ -68,7 +68,7 @@ class PurePursuit(Node):
         # Find lookahead point starting from that segment
         lookahead_pt = self.find_lookahead_point(car_pos, closest_seg_idx)
         if lookahead_pt is None:
-            self.get_logger().warn("No valid lookahead point found.")
+          #  self.get_logger().info(f"tpoints: {car_pos}")
             return
 
         # Transform lookahead to car frame
@@ -83,8 +83,11 @@ class PurePursuit(Node):
 
         steering_angle = math.atan2(2 * self.wheelbase_length * local_y, self.lookahead**2)
 
-        self.get_logger().warn(f"speed: {self.speed}")
-        self.get_logger().warn(f"angle: {steering_angle}")
+       # self.get_logger().warn(f"speed: {self.speed}")
+       # self.get_logger().warn(f"angle: {steering_angle}")
+
+        self.speed = 5.5*(1.0-0.8*abs(math.sin(steering_angle)))
+        self.lookahead = 1.5*(1.0 - 0.025*self.speed) 
 
         drive_msg = AckermannDriveStamped()
         drive_msg.drive.speed = self.speed

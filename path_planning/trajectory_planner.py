@@ -5,7 +5,7 @@ from skimage.morphology import disk, dilation
 import numpy as np
 import heapq
 from math import sqrt
-
+import time
 assert rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped, PoseStamped, PoseArray
 from nav_msgs.msg import OccupancyGrid
@@ -82,7 +82,16 @@ class PathPlan(Node):
 
 
     def plan_path(self, start_point, end_point):
+        start_time = time.time()
         path = self.jump_point_search(start_point, end_point)
+        
+        end_time = time.time()
+        computation_time = end_time - start_time
+        
+        self.get_logger().info(f"path plan time:{computation_time}")
+        
+
+
         if path is None:
             self.get_logger().info("Path not found")
         else:
@@ -269,7 +278,8 @@ class PathPlan(Node):
                 continue
             visited.add(current)
             came_from[current] = parent
-            self.get_logger().info(f"cur: {current}")
+           #  self.get_logger().info(f"cur: {current}")
+
             if current == goal:
                 return self.reconstruct_path(came_from, current)
             for succ in self.successors(current, parent, goal):
