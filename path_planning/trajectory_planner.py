@@ -2,9 +2,12 @@ import rclpy
 from rclpy.node import Node
 from queue import PriorityQueue
 from skimage.morphology import disk, dilation
-import numpy as np 
+import numpy as np
 import heapq
 from math import sqrt
+
+import time
+from std_msgs.msg import Float32
 
 assert rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped, PoseStamped, PoseArray
@@ -82,7 +85,16 @@ class PathPlan(Node):
 
 
     def plan_path(self, start_point, end_point):
-        path = self.jump_point_search(start_point, end_point)
+        start_time = time.time()
+
+        path = self.jump_point_search(start_point, end_point) # edit with a star
+
+        end_time = time.time()
+        computation_time = end_time - start_time
+        time_msg = Float32()
+        time_msg.data = computation_time
+        print(time_msg) # print time
+
         if path is None:
             self.get_logger().info("Path not found")
         else:
@@ -91,7 +103,9 @@ class PathPlan(Node):
                 self.trajectory.addPoint([x, y])
             self.traj_pub.publish(self.trajectory.toPoseArray())
             self.trajectory.publish_viz()
-    
+        
+        
+
     def is_free(self, pos):
         x, y = pos
         if 0 <= x < self.occupancy_grid.shape[1] and 0 <= y < self.occupancy_grid.shape[0]:
@@ -122,12 +136,14 @@ class PathPlan(Node):
     def heuristic(self, a, b):
         dx, dy = abs(a[0] - b[0]), abs(a[1] - b[1])
         return sqrt(dx * dx + dy * dy)
-    
-    def jump(self, current, direction, goal, depth=0, max_depth=700):
-        if depth > max_depth:
-            return None
 
+    def jump(self, current, direction, goal, depth=0, max_depth=700):
         x, y = current
+
+        if depth > max_depth:
+            return (x,y)
+
+
         dx, dy = direction
         nx, ny = x + dx, y + dy
 
@@ -164,7 +180,7 @@ class PathPlan(Node):
     #     if (nx, ny) == goal:
     #         return (nx, ny)
 
-    #     # Forced neighbor check 
+    #     # Forced neighbor check
     #     if dx != 0 and dy != 0:  # Diagonal
     #         if (self.is_free((nx - dx, ny + dy)) and not self.is_free((nx - dx, ny))) or \
     #         (self.is_free((nx + dx, ny - dy)) and not self.is_free((nx, ny - dy))):
@@ -284,7 +300,7 @@ class PathPlan(Node):
             path.append(current)
         path.reverse()
         return path
-    
+
     def create_transform_matrix_2d(self, theta, tx, ty):
         c = np.cos(theta)
         s = np.sin(theta)
@@ -332,7 +348,7 @@ class PathPlan(Node):
         u = pixel_hom[0] / resolution
         v = pixel_hom[1] / resolution
         return int(round(u)), int(round(v))
-    
+
     def euler_from_quaternion(self, quaternion):
         """
         Converts quaternion (w in last place) to euler roll, pitch, yaw
@@ -371,14 +387,40 @@ class PathPlan(Node):
 
     #         if current == goal:
     #             break
-        
+
     #         for next in graph.neighbors(current):
     #             new_cost = cost_so_far[current] + graph.cost(current, next)
     #             if next not in cost_so_far or new_cost < cost_so_far[next]:
     #                 cost_so_far[next] = new_cost
     #                 priority = new_cost + heuristic(goal, next)
     #                 frontier.put(next, priority)
-    #                 came_from[next] = current              
+    #                 came_from[next] = current
+
+    def a_star(self, start, goal):
+        frontier = []
+        heapq.heappush(frontier, (0, start))
+
+        came_from = {}
+        cost_so_far = {}
+
+        came_from[start] = None
+        cost_so_far[start] = 0
+
+        while frontier:
+            _, current = heapq.heappop(frontier)
+
+            if current == goal:
+                break
+
+            for next in self.get_neighbors(current):
+                new_cost = cost_so_far[current] + self.cost(current, next)
+                if next not in cost_so_far or new_cost < cost_so_far[next]:
+                    cost_so_far[next] = new_cost
+                    priority = new_cost + self.heuristic(goal, next)
+                    heapq.heappush(frontier, (priority, next))
+                    came_from[next] = current
+
+        return self.reconstruct_path(came_from, start, goal)
 
 
 def main(args=None):
