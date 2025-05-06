@@ -91,7 +91,7 @@ class PathPlan(Node):
     def map_cb(self, msg):
         init_grid = np.array(msg.data)
         init_grid = init_grid.reshape((msg.info.height, msg.info.width))
-        self.occupancy_grid = dilation(init_grid, disk(12))
+        self.occupancy_grid = dilation(init_grid, disk(8))
         self.resolution = msg.info.resolution
         self.origin = msg.info.origin
         self.get_logger().info("Map loaded")

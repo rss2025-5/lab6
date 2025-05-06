@@ -26,7 +26,7 @@ class PurePursuit(Node):
         self.odom_topic = self.get_parameter('odom_topic').get_parameter_value().string_value
         self.drive_topic = self.get_parameter('drive_topic').get_parameter_value().string_value
 
-        self.lookahead = 0.2
+        self.lookahead = 1.5
         self.speed = 1.0
         self.wheelbase_length = 0.33
 
@@ -145,6 +145,7 @@ class PurePursuit(Node):
     def find_lookahead_point(self, car_pos, start_idx):
         """Find intersection of lookahead circle with trajectory segment ahead, and ensure it's in front of the car."""
         points = self.trajectory.points
+    
         for i in range(start_idx, len(points) - 1):
             a = np.array(points[i])
             b = np.array(points[i + 1])
@@ -177,8 +178,8 @@ class PurePursuit(Node):
             return []  # No intersection
 
         discriminant = math.sqrt(discriminant)
-        t1 = (-b - discriminant) / (2*a)
-        t2 = (-b + discriminant) / (2*a)
+        t1 = (-b - discriminant) / ((2*a)+10e-5)
+        t2 = (-b + discriminant) / ((2*a)+10e-5)
         points = []
         for t in [t1, t2]:
             if 0 <= t <= 1:
