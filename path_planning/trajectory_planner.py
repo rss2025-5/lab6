@@ -80,12 +80,15 @@ class PathPlan(Node):
     def reset_path(self, msg):
         # reset the path and generate a new one from the current pose
         # Initialize current position and goal queue
+        self.get_logger().info('Path Restarteddddddddddddddddddddddddd')
         self.current_position = None
         self.goal_queue = []
         self.is_planning = False
 
         # Flag to track if this is the first goal in a sequence
         self.first_goal = True
+        self.trajectory = LineTrajectory(node=self, viz_namespace="/planned_trajectory")
+
 
 
     def map_cb(self, msg):
