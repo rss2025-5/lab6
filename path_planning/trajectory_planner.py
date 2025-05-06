@@ -6,7 +6,7 @@ import numpy as np
 import heapq
 from math import sqrt
 import time
-from std_msgs.msg import Float32
+from std_msgs.msg import Float32, Bool
 from queue import PriorityQueue
 import numpy as np
 import heapq
@@ -68,12 +68,25 @@ class PathPlan(Node):
             10
         )
 
+        self.gen_traj_sub = self.create_subscription(Bool, '/can_return', self.reset_path, 10)
+
         self.trajectory = LineTrajectory(node=self, viz_namespace="/planned_trajectory")
 
         # Create a timer to process the goal queue
         self.create_timer(1.0, self.process_goal_queue)
 
         self.get_logger().info("Path planner initialized with continuous multi-goal support")
+
+    def reset_path(self, msg):
+        # reset the path and generate a new one from the current pose
+        # Initialize current position and goal queue
+        self.current_position = None
+        self.goal_queue = []
+        self.is_planning = False
+
+        # Flag to track if this is the first goal in a sequence
+        self.first_goal = True
+
 
     def map_cb(self, msg):
         init_grid = np.array(msg.data)
