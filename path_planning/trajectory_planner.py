@@ -94,7 +94,7 @@ class PathPlan(Node):
     def map_cb(self, msg):
         init_grid = np.array(msg.data)
         init_grid = init_grid.reshape((msg.info.height, msg.info.width))
-        self.occupancy_grid = dilation(init_grid, disk(8))
+        self.occupancy_grid = dilation(init_grid, disk(10))
         self.resolution = msg.info.resolution
         self.origin = msg.info.origin
         self.get_logger().info("Map loaded")
@@ -299,8 +299,8 @@ class PathPlan(Node):
 
         if parent is None:
             # No pruning if no parent: first expansion
-            for dx in [-1, 0, 1]:
-                for dy in [-1, 0, 1]:
+            for dx in [1, 0, -1]:
+                for dy in [1, 0,- 1]:
                     if dx != 0 or dy != 0:
                         directions.append((dx, dy))
         else:
